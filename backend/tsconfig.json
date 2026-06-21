@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    /* Modern JS target: Node 18+/20+ supports all ES2022 features natively, so we don't down-level. */
+    "target": "ES2022",
+    "lib": ["ES2022"],
+
+    /* NodeNext = native ESM resolution matching package.json "type": "module".
+       This forces explicit .js extensions on relative imports, which is exactly how Node runs the output. */
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+
+    /* Let `import express from "express"` work even though express is a CommonJS module. */
+    "esModuleInterop": true,
+    /* Allow importing .json files (e.g. a generated dataset manifest) with full typing. */
+    "resolveJsonModule": true,
+
+    /* Full strict suite: catches the bugs a viva would ask about (null checks, implicit any, etc.). */
+    "strict": true,
+
+    /* Build output goes to dist/, compiled from src/ only. */
+    "outDir": "dist",
+    "rootDir": "src",
+
+    /* Skip type-checking of dependency .d.ts files: faster builds, and we don't own those types. */
+    "skipLibCheck": true,
+    /* Catch case-only filename mismatches that break on Linux/Docker but pass on macOS. */
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src"]
+}

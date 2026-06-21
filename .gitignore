@@ -1,0 +1,73 @@
+# ==============================================================================
+# Search Typeahead System — .gitignore
+# ==============================================================================
+
+# ----- Study / personal / AI-assistant files (NOT for submission) -------------
+# These are kept locally for your own study & reference but excluded from git.
+docs/ASSIGNMENT.md
+docs/study/
+CLAUDE.md
+.claude/
+PLAN.md
+NOTES.md
+*.study.md
+scratchpad/
+
+# ----- Node / TypeScript -------------------------------------------------------
+node_modules/
+dist/
+build/
+out/
+*.tsbuildinfo
+.npm/
+.eslintcache
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ----- Environment / secrets ---------------------------------------------------
+.env
+.env.*
+!.env.example
+
+# ----- Frontend (Vite / React) -------------------------------------------------
+frontend/dist/
+frontend/node_modules/
+frontend/.vite/
+.vite/
+
+# ----- Data & databases (large / generated) ------------------------------------
+data/*.csv
+data/*.json
+data/*.db
+data/*.sqlite
+data/*.dump
+!data/.gitkeep
+
+# ----- Docker volumes / local state --------------------------------------------
+.docker-data/
+pgdata/
+redisdata/
+
+# ----- Performance / benchmark artifacts ---------------------------------------
+reports/*.json
+reports/*.csv
+!reports/.gitkeep
+
+# ----- OS / editor -------------------------------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ----- Coverage / test artifacts -----------------------------------------------
+coverage/
+.nyc_output/

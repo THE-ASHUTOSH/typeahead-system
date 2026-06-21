@@ -1,0 +1,164 @@
+# Architecture — Search Typeahead System
+
+This document explains how the system is put together, the data model, the read and write
+paths, and the design choices with their trade-offs. It doubles as the high-level talking
+points for the viva.
+
+## 1. Request-flow diagram
+
+```mermaid
+flowchart TD
+    UI["React UI (:5173)<br/>debounced typing"]
+
+    subgraph API["Express + TypeScript API (:8080)"]
+        SUG["GET /suggest?q=&mode="]
+        SEA["POST /search"]
+        TRE["GET /trending"]
+        DBG["GET /cache/debug"]
+        MET["GET /metrics"]
+    end
+
+    RING{{"ConsistentHashRing<br/>(virtual nodes, md5)"}}
+    R0[("redis-0")]
+    R1[("redis-1")]
+    R2[("redis-2")]
+    TRIE["In-memory Trie<br/>(top-K per node)"]
+    BW["BatchWriter<br/>(buffer + aggregate)"]
+    PG[("Postgres<br/>queries + search_events")]
+
+    UI -- "type" --> SUG
+    UI -- "Enter" --> SEA
+
+    SUG --> RING
+    RING --> R0 & R1 & R2
+    SUG -- "MISS: rebuild from source" --> TRIE
+    SUG -- "populate w/ TTL" --> RING
+
+    SEA -- "return {message:'Searched'} immediately" --> UI
+    SEA -- "record(q) (buffer, non-blocking)" --> BW
+    BW -- "flush: one multi-row upsert" --> PG
+    BW -- "invalidate touched prefixes" --> RING
+    BW -- "schedule rebuild" --> TRIE
+
+    TRIE -- "built once at boot / on flush" --> PG
+    TRE --> PG
+    DBG --> RING
+```
+
+**Read path (`GET /suggest`):** normalize the prefix → the consistent-hash ring picks the
+owning Redis node → **cache HIT** returns the cached top-10 immediately; **MISS** falls back
+to the in-memory trie (O(prefix length)), ranks the matches, stores the result on the owning
+Redis node with a TTL, and returns it. This is **cache-aside**.
+
+**Write path (`POST /search`):** return `{"message":"Searched"}` *immediately* and buffer the
+query in the in-memory `BatchWriter` (an O(1) map increment) — **no synchronous DB write**.
+Periodically (or when the buffer fills) the writer flushes aggregated counts to Postgres in a
+single multi-row upsert, appends one `search_events` row per query (for recency), invalidates
+the affected cache entries, and schedules a trie rebuild so new counts are eventually reflected.
+
+## 2. Components
+
+### Trie (`trie/Trie.ts`)
+A prefix tree keyed by character path, so "all queries under a prefix" is one walk down
+`prefix.length` nodes — independent of dataset size. The key optimization: **every node caches
+its top-K completions** (K = `suggestLimit` = 10), maintained incrementally on insert, so
+`searchPrefix` is O(prefix length) with no query-time subtree scan. Trade-off: extra memory
+(≤K entries/node) and insert cost in exchange for fast, predictable reads — the right call for
+a read-heavy typeahead. The trie is **build-once** (immutable after construction); counts are
+refreshed by rebuilding from Postgres, never mutated in place (this keeps the bounded top-K
+caches correct — an in-place count *decrease* could otherwise strand an evicted candidate).
+
+### Consistent-hash ring (`cache/ConsistentHashRing.ts`)
+Our own implementation — **not** Redis Cluster — so routing is explainable and observable via
+`/cache/debug`. Both nodes and keys are hashed onto a 2³² ring with **md5** (deterministic and
+stable across restarts; we use only its bits for placement, not its security). Each physical
+node is placed at **150 virtual-node** positions so load is even across only 3 nodes and a
+departing node's keys spread across all survivors instead of dumping on one neighbour.
+`getNode(key)` does a binary search for the first ring position ≥ the key's hash (wrapping
+around). **The headline property:** adding/removing a node only re-homes the ~1/N of keys in
+that node's arc — verified at ~1/4 when adding a 4th node — versus `hash % N`, which changes
+the modulus for almost every key and effectively wipes the cache.
+
+### Cache service (`cache/CacheService.ts`, `cache/RedisCacheNode.ts`)
+The cache-aside facade routes each prefix through the ring to one Redis node. Entries carry a
+**60s TTL** (a staleness bound that holds even if explicit invalidation is missed) and are also
+**invalidated on flush** when rankings change (the fast path). If a Redis node is unreachable,
+reads degrade to a **miss** (rebuild from the trie) rather than erroring a keystroke. Cache keys
+are **mode-namespaced and length-prefixed** (`${mode}:${q.length}:${q}`) so basic and recency
+results never collide. Hits/misses are recorded for the hit-rate metric.
+
+### Batch writer (`batch/BatchWriter.ts`)
+Buffers submissions in a `Map<query, delta>` so repeats aggregate (50× "iphone" → one `+50`
+upsert). Flushes on **size** (`BATCH_SIZE` = 500 distinct queries) **or time** (`BATCH_FLUSH_MS`
+= 2s), whichever first. The DB upsert and cache invalidation are **injected callbacks**, so the
+module is unit-testable with no DB. On `onFlush` failure it **re-queues** the snapshot (nothing
+lost). It tracks `writesSaved = totalSubmissions − totalDbWrites` — the write-reduction evidence.
+**Failure trade-off:** a hard crash before a flush loses up to ~`BATCH_FLUSH_MS` of buffered
+counts; a graceful shutdown flushes the tail. (A WAL could close that gap at the cost of
+write-amplification — unnecessary for an analytics-style counter where a few lost increments are
+tolerable.)
+
+### Recency ranking (`ranking/recency.ts`)
+Blends popularity and recent activity: `score = 3·count1h + 1.5·count24h + 1·allTimeCount`
+(weights from config). 1h is weighted highest so a current burst can out-rank an all-time
+favourite (= "trending"); all-time is the baseline so the enhanced ranking degrades gracefully
+to the basic one when nothing is trending. Window counts come from `search_events` via
+`SUM(hits)`.
+
+### Primary store (`store/QueryStore.ts`, `store/schema.sql`)
+The only module that touches Postgres. The flush is **one parameterized multi-row upsert**
+(`INSERT ... VALUES (...),(...) ON CONFLICT (query) DO UPDATE SET count = count + EXCLUDED.count`)
+— N aggregated queries = one round-trip. It tracks `dbReads`/`dbWrites` for the metrics. The
+trie is rebuilt from a streamed `loadAll()` so we never hold the full 162k result set plus the
+growing trie at once.
+
+## 3. Data model
+
+```sql
+queries(
+  query         TEXT PRIMARY KEY,   -- the query text is the natural key
+  count         BIGINT NOT NULL,    -- lifetime/all-time count
+  last_searched TIMESTAMPTZ
+)
+
+search_events(
+  id    BIGSERIAL PRIMARY KEY,
+  query TEXT NOT NULL,
+  hits  INTEGER NOT NULL DEFAULT 1, -- aggregated searches for this query in one flush
+  ts    TIMESTAMPTZ NOT NULL DEFAULT now()
+)
+```
+
+**Why two tables:** `queries` answers "how popular *ever*?" (the trie is rebuilt from it);
+`search_events` answers "how popular *lately*?" (the recency windows aggregate it).
+
+**Why "one aggregated row per flush" + `SUM(hits)` (not one row per search + `COUNT(*)`):**
+a query searched 50 times in a flush writes **one** row with `hits = 50`, not 50 rows. Event-row
+volume is then bounded by *distinct queries per flush*, while `SUM(hits) WHERE ts >= now() -
+interval '1 hour'` still reconstructs the true windowed count. The only cost is coarsening time
+resolution to the flush boundary — irrelevant for 1h/24h windows. No SQL prefix index exists on
+`queries` on purpose: prefix lookups are served by the trie from RAM, never by a per-keystroke
+`LIKE` scan.
+
+## 4. Design choices & trade-offs
+
+| Choice | Why | Trade-off |
+|---|---|---|
+| Consistent hashing (own ring) vs `hash % N` | Only ~1/N keys move on a topology change; routing is explainable & observable | More code than `% N`; we manage the ring ourselves |
+| Virtual nodes (150/node) | Even key spread across only 3 nodes; smooth rebalancing | A little memory for ~450 ring points |
+| Cache-aside vs write-through | Source of truth stays Postgres/trie; cache is recoverable & ranking-agnostic | First read of a key is always a miss |
+| TTL **and** invalidation | Invalidation is fast; TTL is the safety net for anything missed | Bounded staleness (≤ TTL) on un-invalidated ancestor prefixes |
+| Build-once trie + rebuild-on-flush | Keeps per-node top-K simple and correct | Periodic O(dataset) rebuild instead of cheap in-place updates |
+| Batching (async writes) | Huge write reduction (measured ~20×), low read latency | Up to ~`BATCH_FLUSH_MS` of counts lost on a hard crash |
+| Sliding windows for recency | A spike ages out automatically — no permanent over-ranking; no decay job | Window aggregation runs on each recency miss |
+| Redis nodes simulated as logical nodes on our ring | Demonstrates distribution + rebalancing without Redis Cluster | Not a production HA cluster |
+
+## 5. What I'd change at real scale
+
+- Redis Cluster (or a managed equivalent) for HA, with our ring's lessons applied.
+- Prefix-fan-out invalidation (invalidate every ancestor prefix of a changed query) instead of
+  relying on the TTL backstop.
+- A write-ahead log for the batch buffer if losing a few seconds of counts were unacceptable.
+- `COPY FROM STDIN` for ingest at much larger dataset sizes.
+- Incremental trie updates (or a sharded trie) instead of a full rebuild, if the dataset grew
+  large enough that the rebuild cost mattered.

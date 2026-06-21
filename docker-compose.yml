@@ -1,0 +1,72 @@
+# Local infrastructure for the search typeahead system.
+#
+# Two roles:
+#   - postgres  : the PRIMARY, durable data store (queries + search_events tables).
+#   - redis-0/1/2 : the THREE LOGICAL CACHE NODES. We deliberately run three *separate*
+#                   single Redis servers (NOT Redis Cluster). Our own consistent-hash
+#                   ring (backend/src/cache/ConsistentHashRing.ts) decides which of these
+#                   three nodes owns a given prefix key. Keeping them independent is what
+#                   makes the routing OUR code and fully explainable in the viva, and lets
+#                   /cache/debug show the chosen node + hit/miss.
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: typeahead-postgres
+    environment:
+      # All three credentials are "typeahead" to match the default DATABASE_URL in config.ts.
+      POSTGRES_USER: typeahead
+      POSTGRES_PASSWORD: typeahead
+      POSTGRES_DB: typeahead
+    ports:
+      - "5432:5432"
+    volumes:
+      # Named volume so the ~150k-row dataset survives container restarts during the demo.
+      - typeahead-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # pg_isready: dependents/tooling can wait until Postgres actually accepts connections.
+      test: ["CMD-SHELL", "pg_isready -U typeahead -d typeahead"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # --- Cache node 0 of 3 on our consistent-hash ring ---
+  redis-0:
+    image: redis:7-alpine
+    container_name: typeahead-redis-0
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # --- Cache node 1 of 3 on our consistent-hash ring ---
+  redis-1:
+    image: redis:7-alpine
+    container_name: typeahead-redis-1
+    # Host port 6380 -> container 6379. Each node is a plain standalone Redis; the ring,
+    # not Redis itself, shards keys across them.
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # --- Cache node 2 of 3 on our consistent-hash ring ---
+  redis-2:
+    image: redis:7-alpine
+    container_name: typeahead-redis-2
+    ports:
+      - "6381:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  typeahead-pgdata:

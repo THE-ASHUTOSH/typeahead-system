@@ -1,0 +1,492 @@
+/* ───────────────────────────────────────────────────────────────────────────────────
+   Plain CSS for the typeahead UI. No UI library — the spec only needs a clean, usable,
+   responsive layout, and hand-written CSS keeps the whole project explainable in the viva.
+   CSS custom properties hold the palette + a few shared tokens so the look is consistent
+   and tweakable in one place.
+   ─────────────────────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* Palette: a calm slate-blue dark theme with a cyan accent. */
+  --bg: #0b1220;
+  --bg-glow: #15233f;
+  --panel: #151f33;
+  --panel-2: #1b2740;
+  --panel-3: #223150;
+  --border: #2a3a57;
+  --border-soft: #223150;
+  --text: #eef2f8;
+  --muted: #94a3b8;
+  --muted-2: #64748b;
+  --accent: #38bdf8;
+  --accent-strong: #0ea5e9;
+  --accent-ink: #052230;
+  --highlight: #1e40af;
+  --highlight-soft: rgba(56, 189, 248, 0.12);
+  --danger: #fb7185;
+  --ok: #4ade80;
+
+  --radius: 14px;
+  --radius-sm: 9px;
+  --shadow: 0 18px 40px -12px rgba(0, 0, 0, 0.55);
+  --shadow-soft: 0 6px 18px -8px rgba(0, 0, 0, 0.5);
+  --ring: 0 0 0 3px rgba(56, 189, 248, 0.22);
+  --ease: 160ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background:
+    radial-gradient(900px 500px at 50% -8%, var(--bg-glow) 0%, transparent 70%),
+    var(--bg);
+  background-attachment: fixed;
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: rgba(56, 189, 248, 0.3);
+}
+
+/* Scoped, quiet scrollbars for the dropdown/list areas. */
+.dropdown__list::-webkit-scrollbar {
+  width: 10px;
+}
+.dropdown__list::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 999px;
+  border: 3px solid var(--panel-2);
+}
+
+.app {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 3rem 1.25rem 4rem;
+}
+
+/* ── Header / hero ──────────────────────────────────────────────────────────────── */
+
+.app__header {
+  text-align: center;
+  margin-bottom: 2rem;
+}
+
+.app__title {
+  margin: 0;
+  font-size: 2.1rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  background: linear-gradient(180deg, #ffffff 0%, #b9d4ea 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.app__subtitle {
+  margin: 0.55rem auto 0;
+  max-width: 42rem;
+  color: var(--muted);
+  font-size: 0.96rem;
+  line-height: 1.5;
+}
+
+/* ── Layout: search left, trending right; single column on narrow screens ─────────── */
+
+.layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.4rem;
+}
+
+@media (min-width: 840px) {
+  .layout {
+    grid-template-columns: 1.7fr 1fr;
+    align-items: start;
+  }
+}
+
+.panel {
+  background: linear-gradient(180deg, var(--panel) 0%, #131d30 100%);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  padding: 1.25rem 1.25rem 1.4rem;
+  box-shadow: var(--shadow);
+}
+
+.panel__title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 1rem;
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted-2);
+}
+
+/* Transient "updating…" hint next to the Trending title while we wait out the batch flush. */
+.panel__hint {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+  font-style: italic;
+  color: var(--accent);
+  opacity: 0.85;
+}
+
+/* ── Search box ─────────────────────────────────────────────────────────────────── */
+
+.search {
+  position: relative;
+}
+
+.search__row {
+  display: flex;
+  gap: 0.6rem;
+  align-items: stretch;
+}
+
+.search__input {
+  flex: 1;
+  width: 100%;
+  font-size: 1.08rem;
+  padding: 0.95rem 1.05rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  outline: none;
+  transition: border-color var(--ease), box-shadow var(--ease), background var(--ease);
+}
+
+.search__input::placeholder {
+  color: var(--muted-2);
+}
+
+.search__input:hover {
+  border-color: #34507a;
+}
+
+.search__input:focus {
+  border-color: var(--accent);
+  background: #1d2c47;
+  box-shadow: var(--ring);
+}
+
+.search__button {
+  padding: 0 1.35rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(180deg, var(--accent) 0%, var(--accent-strong) 100%);
+  color: var(--accent-ink);
+  cursor: pointer;
+  transition: filter var(--ease), transform var(--ease), opacity var(--ease);
+}
+
+.search__button:hover {
+  filter: brightness(1.08);
+}
+
+.search__button:active {
+  transform: translateY(1px);
+}
+
+.search__button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: none;
+}
+
+/* ── Suggestion dropdown ────────────────────────────────────────────────────────── */
+
+.dropdown {
+  position: absolute;
+  z-index: 20;
+  left: 0;
+  right: 0;
+  margin-top: 0.5rem;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  animation: dropdown-in 130ms ease-out;
+}
+
+@keyframes dropdown-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.dropdown__list {
+  list-style: none;
+  margin: 0;
+  padding: 0.35rem;
+  max-height: 380px;
+  overflow-y: auto;
+}
+
+.dropdown__item {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background var(--ease), color var(--ease);
+}
+
+.dropdown__item + .dropdown__item {
+  /* Hairline divider between rows for scannability (drawn as a top border via ::before
+     so it doesn't shift layout and disappears under the active highlight). */
+  margin-top: 1px;
+}
+
+/* Active (keyboard-highlighted OR hovered) row — one shared visual model for mouse + keys. */
+.dropdown__item--active,
+.dropdown__item:hover {
+  background: linear-gradient(90deg, var(--highlight) 0%, #2747a8 100%);
+  color: #fff;
+}
+
+.dropdown__query {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.96rem;
+}
+
+/* A faint inline bar behind the score gives each suggestion visual weight by popularity.
+   Width is set inline (style) from the score's share of the top result. */
+.dropdown__score {
+  flex: none;
+  position: relative;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.76rem;
+  color: var(--muted);
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.12);
+}
+
+.dropdown__item--active .dropdown__score {
+  color: #e6f2ff;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.dropdown__meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 0.8rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.badge {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.badge--cache {
+  background: rgba(74, 222, 128, 0.16);
+  color: var(--ok);
+}
+
+.badge--trie {
+  background: rgba(56, 189, 248, 0.16);
+  color: var(--accent);
+}
+
+.dropdown__node {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--muted);
+}
+
+/* ── Status (loading / error / empty) ───────────────────────────────────────────── */
+
+.status {
+  padding: 0.85rem 0.85rem;
+  font-size: 0.9rem;
+}
+
+.status--error {
+  color: var(--danger);
+}
+
+.status--muted {
+  color: var(--muted);
+}
+
+/* Tiny CSS-only spinner for the loading state. */
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-right: 0.5rem;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  vertical-align: -2px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ── Mode toggle ────────────────────────────────────────────────────────────────── */
+
+.toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px;
+  background: var(--panel-2);
+  margin-top: 1rem;
+}
+
+.toggle__btn {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 0.4rem 0.95rem;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background var(--ease), color var(--ease);
+}
+
+.toggle__btn:hover:not(.toggle__btn--active) {
+  color: var(--text);
+}
+
+.toggle__btn--active {
+  background: linear-gradient(180deg, var(--accent) 0%, var(--accent-strong) 100%);
+  color: var(--accent-ink);
+  box-shadow: var(--shadow-soft);
+}
+
+.toggle__hint {
+  display: block;
+  margin-top: 0.55rem;
+  font-size: 0.76rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+/* ── Search result banner (dummy "Searched" response) ───────────────────────────── */
+
+.result-banner {
+  margin-top: 1.1rem;
+  padding: 0.75rem 0.95rem;
+  border-radius: var(--radius-sm);
+  background: rgba(74, 222, 128, 0.1);
+  border: 1px solid rgba(74, 222, 128, 0.3);
+  color: var(--ok);
+  font-size: 0.9rem;
+  animation: dropdown-in 150ms ease-out;
+}
+
+/* ── Trending list ──────────────────────────────────────────────────────────────── */
+
+.trending__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.trending__item {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.55rem 0.55rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--ease);
+}
+
+.trending__item:hover {
+  background: var(--panel-3);
+}
+
+.trending__item:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+
+.trending__rank {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 1.55rem;
+  height: 1.55rem;
+  border-radius: 8px;
+  background: var(--panel-3);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+/* Top three get a warmer rank chip so "hottest" reads at a glance. */
+.trending__item:nth-child(1) .trending__rank {
+  background: rgba(56, 189, 248, 0.2);
+  color: var(--accent);
+}
+.trending__item:nth-child(2) .trending__rank,
+.trending__item:nth-child(3) .trending__rank {
+  background: rgba(56, 189, 248, 0.12);
+  color: #7dd3fc;
+}
+
+.trending__query {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.92rem;
+}
+
+.trending__counts {
+  flex: none;
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.1);
+}
