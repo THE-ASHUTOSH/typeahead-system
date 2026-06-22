@@ -75,10 +75,6 @@ export function TrendingPanel({
             >
               <span className="trending__rank">{i + 1}</span>
               <span className="trending__query">{row.query}</span>
-              {/* Show both windows so the recency basis is visible in the demo. */}
-              <span className="trending__counts" title="searches in last 1h / 24h">
-                {row.count1h} / {row.count24h}
-              </span>
             </li>
           ))}
         </ol>

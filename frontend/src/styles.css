@@ -509,13 +509,3 @@ body {
   font-size: 0.93rem;
   color: var(--ink-2);
 }
-
-.trending__counts {
-  flex: none;
-  font-size: 0.72rem;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-  padding: 0.12rem 0.5rem;
-  border-radius: 999px;
-  background: var(--bg-2);
-}
