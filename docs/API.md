@@ -46,8 +46,8 @@ curl "http://localhost:8080/suggest?q=iphone%20ca&mode=recency"
 ```
 - `score` — the value the active mode ranked by (all-time count in `basic`; the blended recency
   score in `recency`).
-- `source` — `"cache"` (served from Redis), `"trie"` (cache miss, rebuilt from the trie and then
-  cached), or `"empty"` (no `q` given — no lookup performed).
+- `source` — `"cache"` (served from Redis), `"db"` (cache miss, read from Postgres via the SQL
+  prefix query and then cached), or `"empty"` (no `q` given — no lookup performed).
 - `node` — the Redis node the ring routed this prefix to (`null` for the empty case).
 
 Edge cases (all `200`): empty `q` → `{ "suggestions": [], "source": "empty", ... }`; mixed case

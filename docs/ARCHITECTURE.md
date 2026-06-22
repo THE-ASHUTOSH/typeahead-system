@@ -22,7 +22,6 @@ flowchart TD
     R0[("redis-0")]
     R1[("redis-1")]
     R2[("redis-2")]
-    TRIE["In-memory Trie<br/>(top-K per node)"]
     BW["BatchWriter<br/>(buffer + aggregate)"]
     PG[("Postgres<br/>queries + search_events")]
 
@@ -31,42 +30,44 @@ flowchart TD
 
     SUG --> RING
     RING --> R0 & R1 & R2
-    SUG -- "MISS: rebuild from source" --> TRIE
+    SUG -- "MISS: SQL prefix query" --> PG
     SUG -- "populate w/ TTL" --> RING
 
     SEA -- "return {message:'Searched'} immediately" --> UI
     SEA -- "record(q) (buffer, non-blocking)" --> BW
     BW -- "flush: one multi-row upsert" --> PG
     BW -- "invalidate touched prefixes" --> RING
-    BW -- "schedule rebuild" --> TRIE
 
-    TRIE -- "built once at boot / on flush" --> PG
     TRE --> PG
     DBG --> RING
 ```
 
 **Read path (`GET /suggest`):** normalize the prefix → the consistent-hash ring picks the
-owning Redis node → **cache HIT** returns the cached top-10 immediately; **MISS** falls back
-to the in-memory trie (O(prefix length)), ranks the matches, stores the result on the owning
-Redis node with a TTL, and returns it. This is **cache-aside**.
+owning Redis node → **cache HIT** returns the cached top-10 immediately; **MISS** runs a SQL
+prefix query against Postgres (`WHERE query LIKE 'p%' ORDER BY count DESC LIMIT 10`, a bounded
+index scan), ranks the matches, stores the result on the owning Redis node with a TTL, and
+returns it. This is **cache-aside**.
 
 **Write path (`POST /search`):** return `{"message":"Searched"}` *immediately* and buffer the
 query in the in-memory `BatchWriter` (an O(1) map increment) — **no synchronous DB write**.
 Periodically (or when the buffer fills) the writer flushes aggregated counts to Postgres in a
-single multi-row upsert, appends one `search_events` row per query (for recency), invalidates
-the affected cache entries, and schedules a trie rebuild so new counts are eventually reflected.
+single multi-row upsert, appends one `search_events` row per query (for recency), and invalidates
+the affected cache entries. The new counts are now in Postgres, so the next cache miss reads them
+via the prefix query — there's no in-memory index to rebuild.
 
 ## 2. Components
 
-### Trie (`trie/Trie.ts`)
-A prefix tree keyed by character path, so "all queries under a prefix" is one walk down
-`prefix.length` nodes — independent of dataset size. The key optimization: **every node caches
-its top-K completions** (K = `suggestLimit` = 10), maintained incrementally on insert, so
-`searchPrefix` is O(prefix length) with no query-time subtree scan. Trade-off: extra memory
-(≤K entries/node) and insert cost in exchange for fast, predictable reads — the right call for
-a read-heavy typeahead. The trie is **build-once** (immutable after construction); counts are
-refreshed by rebuilding from Postgres, never mutated in place (this keeps the bounded top-K
-caches correct — an in-place count *decrease* could otherwise strand an evicted candidate).
+### Prefix search (`store/QueryStore.ts` → `searchPrefix`)
+Suggestions on a cache miss come from a SQL prefix query:
+`SELECT query, count FROM queries WHERE query LIKE 'p%' ORDER BY count DESC LIMIT 10`. The key to
+making this fast is the **`idx_queries_prefix`** index built with the `text_pattern_ops` operator
+class: a normal text index sorts by the DB's collation (which `LIKE 'x%'` can't range-scan), whereas
+`text_pattern_ops` sorts by byte order, turning the query into a **bounded range scan** of just the
+matching prefix (verified via `EXPLAIN` → `Bitmap Index Scan`, not `Seq Scan`). The user's prefix is
+a bound parameter (no SQL injection) and its LIKE wildcards (`%` `_` `\`) are escaped (no pattern
+injection). This only runs on a miss (~1% of reads); the cache absorbs the rest. *(A classic
+alternative is an in-memory trie answering in O(prefix length); we chose SQL to keep Postgres the
+single source of truth with no second index to keep in sync.)*
 
 ### Consistent-hash ring (`cache/ConsistentHashRing.ts`)
 Our own implementation — **not** Redis Cluster — so routing is explainable and observable via
@@ -83,7 +84,7 @@ the modulus for almost every key and effectively wipes the cache.
 The cache-aside facade routes each prefix through the ring to one Redis node. Entries carry a
 **60s TTL** (a staleness bound that holds even if explicit invalidation is missed) and are also
 **invalidated on flush** when rankings change (the fast path). If a Redis node is unreachable,
-reads degrade to a **miss** (rebuild from the trie) rather than erroring a keystroke. Cache keys
+reads degrade to a **miss** (read from Postgres) rather than erroring a keystroke. Cache keys
 are **mode-namespaced and length-prefixed** (`${mode}:${q.length}:${q}`) so basic and recency
 results never collide. Hits/misses are recorded for the hit-rate metric.
 
@@ -106,11 +107,10 @@ to the basic one when nothing is trending. Window counts come from `search_event
 `SUM(hits)`.
 
 ### Primary store (`store/QueryStore.ts`, `store/schema.sql`)
-The only module that touches Postgres. The flush is **one parameterized multi-row upsert**
+The only module that touches Postgres. It owns the prefix search (`searchPrefix`, above), the
+window-count queries for recency, and the flush. The flush is **one parameterized multi-row upsert**
 (`INSERT ... VALUES (...),(...) ON CONFLICT (query) DO UPDATE SET count = count + EXCLUDED.count`)
-— N aggregated queries = one round-trip. It tracks `dbReads`/`dbWrites` for the metrics. The
-trie is rebuilt from a streamed `loadAll()` so we never hold the full 162k result set plus the
-growing trie at once.
+— N aggregated queries = one round-trip. It tracks `dbReads`/`dbWrites` for the metrics.
 
 ## 3. Data model
 
@@ -129,16 +129,16 @@ search_events(
 )
 ```
 
-**Why two tables:** `queries` answers "how popular *ever*?" (the trie is rebuilt from it);
+**Why two tables:** `queries` answers "how popular *ever*?" (the prefix search reads it);
 `search_events` answers "how popular *lately*?" (the recency windows aggregate it).
 
 **Why "one aggregated row per flush" + `SUM(hits)` (not one row per search + `COUNT(*)`):**
 a query searched 50 times in a flush writes **one** row with `hits = 50`, not 50 rows. Event-row
 volume is then bounded by *distinct queries per flush*, while `SUM(hits) WHERE ts >= now() -
 interval '1 hour'` still reconstructs the true windowed count. The only cost is coarsening time
-resolution to the flush boundary — irrelevant for 1h/24h windows. No SQL prefix index exists on
-`queries` on purpose: prefix lookups are served by the trie from RAM, never by a per-keystroke
-`LIKE` scan.
+resolution to the flush boundary — irrelevant for 1h/24h windows. The `queries` table carries the
+**`text_pattern_ops` prefix index** (`idx_queries_prefix`) so the cache-miss `LIKE 'p%'` lookup is a
+bounded range scan rather than a full-table scan.
 
 ## 4. Design choices & trade-offs
 
@@ -146,9 +146,10 @@ resolution to the flush boundary — irrelevant for 1h/24h windows. No SQL prefi
 |---|---|---|
 | Consistent hashing (own ring) vs `hash % N` | Only ~1/N keys move on a topology change; routing is explainable & observable | More code than `% N`; we manage the ring ourselves |
 | Virtual nodes (150/node) | Even key spread across only 3 nodes; smooth rebalancing | A little memory for ~450 ring points |
-| Cache-aside vs write-through | Source of truth stays Postgres/trie; cache is recoverable & ranking-agnostic | First read of a key is always a miss |
+| SQL prefix search vs in-memory trie | Postgres stays the single source of truth — no second index to keep in sync; cache hides the miss cost | A raw miss does a DB round-trip (a trie would be faster), but misses are ~1% |
+| Cache-aside vs write-through | Source of truth stays Postgres; cache is recoverable & ranking-agnostic | First read of a key is always a miss |
 | TTL **and** invalidation | Invalidation is fast; TTL is the safety net for anything missed | Bounded staleness (≤ TTL) on un-invalidated ancestor prefixes |
-| Build-once trie + rebuild-on-flush | Keeps per-node top-K simple and correct | Periodic O(dataset) rebuild instead of cheap in-place updates |
+| `text_pattern_ops` prefix index | Makes `LIKE 'p%'` a bounded range scan, not a full-table scan | An extra index to maintain on `queries` |
 | Batching (async writes) | Huge write reduction (measured ~20×), low read latency | Up to ~`BATCH_FLUSH_MS` of counts lost on a hard crash |
 | Sliding windows for recency | A spike ages out automatically — no permanent over-ranking; no decay job | Window aggregation runs on each recency miss |
 | Redis nodes simulated as logical nodes on our ring | Demonstrates distribution + rebalancing without Redis Cluster | Not a production HA cluster |
@@ -160,5 +161,5 @@ resolution to the flush boundary — irrelevant for 1h/24h windows. No SQL prefi
   relying on the TTL backstop.
 - A write-ahead log for the batch buffer if losing a few seconds of counts were unacceptable.
 - `COPY FROM STDIN` for ingest at much larger dataset sizes.
-- Incremental trie updates (or a sharded trie) instead of a full rebuild, if the dataset grew
-  large enough that the rebuild cost mattered.
+- An in-memory trie (or a search engine like Elasticsearch) in front of the prefix query, if the
+  cache-miss SQL ever became the bottleneck.

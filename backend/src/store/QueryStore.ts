@@ -35,7 +35,7 @@ type PoolType = pg.Pool;
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCHEMA_PATH = join(__dirname, "schema.sql");
 
-/** One (query, count) pair as stored in the `queries` table — used to build the trie. */
+/** One (query, count) pair as stored in the `queries` table — returned by the prefix search. */
 export interface QueryRow {
   query: string;
   count: number;
@@ -220,6 +220,49 @@ export class QueryStore {
     this.dbWrites += 1;
     await pool.query(eventSql, eventParams);
     this.dbWrites += 1;
+  }
+
+  /**
+   * THE PREFIX SEARCH (cache-MISS source for GET /suggest).
+   *
+   * Returns up to `limit` queries that START WITH `prefix`, sorted by all-time count DESC.
+   * This is the source of truth for suggestions when the Redis cache misses; on a hit the
+   * route never calls this (so it runs on roughly 1% of suggestion requests in practice).
+   *
+   * WHY a SQL prefix query (LIKE 'prefix%'):
+   *   * `query LIKE $1` with `$1 = prefix || '%'` is a RANGE scan, not a full-table scan,
+   *     PROVIDED the `queries(query)` column has a prefix-capable index. Postgres only uses
+   *     a btree for `LIKE 'x%'` if the index is built with the `text_pattern_ops` operator
+   *     class (a plain btree sorts by the DB's collation, which `LIKE` can't range-scan).
+   *     We add exactly that index in schema.sql (idx_queries_prefix), so this stays a fast
+   *     bounded scan even on ~162k rows.
+   *   * We escape LIKE wildcards in the user's prefix (\, %, _) so a query like "50%_off"
+   *     is matched literally, not interpreted as a pattern. ESCAPE '\' declares the escape char.
+   *   * ORDER BY count DESC LIMIT $2 gives the top-K directly; the count index isn't needed
+   *     because the prefix range is small (a handful to a few thousand rows) and sorting that
+   *     is cheap. Normalised (trim+lowercase) to match how queries are stored and cached.
+   *
+   * Returns [] for an empty/blank prefix (the route also short-circuits that case).
+   */
+  async searchPrefix(prefix: string, limit: number = config.suggestLimit): Promise<QueryRow[]> {
+    const p = prefix.trim().toLowerCase();
+    if (p.length === 0) return [];
+    const pool = this.requirePool();
+
+    // Escape the LIKE metacharacters in the user input so they match literally.
+    const escaped = p.replace(/([\\%_])/g, "\\$1");
+
+    this.dbReads += 1;
+    const result = await pool.query<{ query: string; count: string }>(
+      `SELECT query, count
+         FROM queries
+        WHERE query LIKE $1 ESCAPE '\\'
+        ORDER BY count DESC
+        LIMIT $2`,
+      [`${escaped}%`, limit],
+    );
+
+    return result.rows.map((r) => ({ query: r.query, count: Number(r.count) }));
   }
 
   /**

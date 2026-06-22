@@ -1,36 +1,36 @@
 /* ───────────────────────────────────────────────────────────────────────────────────
-   Plain CSS for the typeahead UI. No UI library — the spec only needs a clean, usable,
-   responsive layout, and hand-written CSS keeps the whole project explainable in the viva.
-   CSS custom properties hold the palette + a few shared tokens so the look is consistent
-   and tweakable in one place.
+   Light / modern-SaaS theme for the typeahead UI. No UI library — hand-written CSS keeps
+   the whole project explainable in the viva. CSS custom properties hold the palette and a
+   few shared tokens so the look is consistent and tweakable in one place.
    ─────────────────────────────────────────────────────────────────────────────────── */
 
 :root {
-  /* Palette: a calm slate-blue dark theme with a cyan accent. */
-  --bg: #0b1220;
-  --bg-glow: #15233f;
-  --panel: #151f33;
-  --panel-2: #1b2740;
-  --panel-3: #223150;
-  --border: #2a3a57;
-  --border-soft: #223150;
-  --text: #eef2f8;
-  --muted: #94a3b8;
-  --muted-2: #64748b;
-  --accent: #38bdf8;
-  --accent-strong: #0ea5e9;
-  --accent-ink: #052230;
-  --highlight: #1e40af;
-  --highlight-soft: rgba(56, 189, 248, 0.12);
-  --danger: #fb7185;
-  --ok: #4ade80;
+  /* Palette: airy off-white surfaces, slate ink, a single blue accent. */
+  --bg: #f6f8fb;
+  --bg-2: #eef2f8;
+  --surface: #ffffff;
+  --surface-2: #f8fafc;
+  --border: #e3e8ef;
+  --border-strong: #d3dae6;
+  --ink: #0f172a;
+  --ink-2: #334155;
+  --muted: #64748b;
+  --muted-2: #94a3b8;
+  --accent: #2563eb;
+  --accent-strong: #1d4ed8;
+  --accent-soft: #eff4ff;
+  --accent-ink: #ffffff;
+  --ok: #16a34a;
+  --ok-soft: #ecfdf3;
+  --danger: #dc2626;
 
-  --radius: 14px;
-  --radius-sm: 9px;
-  --shadow: 0 18px 40px -12px rgba(0, 0, 0, 0.55);
-  --shadow-soft: 0 6px 18px -8px rgba(0, 0, 0, 0.5);
-  --ring: 0 0 0 3px rgba(56, 189, 248, 0.22);
-  --ease: 160ms cubic-bezier(0.4, 0, 0.2, 1);
+  --radius: 16px;
+  --radius-sm: 11px;
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06), 0 1px 3px rgba(15, 23, 42, 0.04);
+  --shadow-md: 0 4px 14px -4px rgba(15, 23, 42, 0.12), 0 2px 6px -2px rgba(15, 23, 42, 0.08);
+  --shadow-lg: 0 22px 48px -16px rgba(15, 23, 42, 0.22);
+  --ring: 0 0 0 4px rgba(37, 99, 235, 0.14);
+  --ease: 150ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 * {
@@ -46,128 +46,111 @@ body {
 body {
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   background:
-    radial-gradient(900px 500px at 50% -8%, var(--bg-glow) 0%, transparent 70%),
+    radial-gradient(820px 420px at 50% -120px, var(--accent-soft) 0%, transparent 70%),
     var(--bg);
   background-attachment: fixed;
-  color: var(--text);
+  color: var(--ink);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
 
 ::selection {
-  background: rgba(56, 189, 248, 0.3);
+  background: rgba(37, 99, 235, 0.16);
 }
 
-/* Scoped, quiet scrollbars for the dropdown/list areas. */
 .dropdown__list::-webkit-scrollbar {
   width: 10px;
 }
 .dropdown__list::-webkit-scrollbar-thumb {
-  background: var(--border);
+  background: var(--border-strong);
   border-radius: 999px;
-  border: 3px solid var(--panel-2);
+  border: 3px solid var(--surface);
 }
 
 .app {
-  max-width: 980px;
+  max-width: 720px;
   margin: 0 auto;
-  padding: 3rem 1.25rem 4rem;
+  padding: 3.5rem 1.25rem 4rem;
 }
 
 /* ── Header / hero ──────────────────────────────────────────────────────────────── */
 
 .app__header {
   text-align: center;
-  margin-bottom: 2rem;
+  margin-bottom: 1.75rem;
+}
+
+.app__badge {
+  display: inline-block;
+  margin-bottom: 0.9rem;
+  padding: 0.3rem 0.8rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid #dbe6ff;
+  border-radius: 999px;
 }
 
 .app__title {
   margin: 0;
-  font-size: 2.1rem;
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  background: linear-gradient(180deg, #ffffff 0%, #b9d4ea 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  font-size: 2.3rem;
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  color: var(--ink);
 }
 
 .app__subtitle {
-  margin: 0.55rem auto 0;
-  max-width: 42rem;
+  margin: 0.6rem auto 0;
+  max-width: 34rem;
   color: var(--muted);
-  font-size: 0.96rem;
-  line-height: 1.5;
+  font-size: 0.98rem;
+  line-height: 1.55;
 }
 
-/* ── Layout: search left, trending right; single column on narrow screens ─────────── */
+/* ── Search hero ────────────────────────────────────────────────────────────────── */
 
-.layout {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 1.4rem;
+.hero {
+  margin-bottom: 1.75rem;
 }
-
-@media (min-width: 840px) {
-  .layout {
-    grid-template-columns: 1.7fr 1fr;
-    align-items: start;
-  }
-}
-
-.panel {
-  background: linear-gradient(180deg, var(--panel) 0%, #131d30 100%);
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius);
-  padding: 1.25rem 1.25rem 1.4rem;
-  box-shadow: var(--shadow);
-}
-
-.panel__title {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin: 0 0 1rem;
-  font-size: 0.74rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  color: var(--muted-2);
-}
-
-/* Transient "updating…" hint next to the Trending title while we wait out the batch flush. */
-.panel__hint {
-  text-transform: none;
-  letter-spacing: 0;
-  font-weight: 500;
-  font-style: italic;
-  color: var(--accent);
-  opacity: 0.85;
-}
-
-/* ── Search box ─────────────────────────────────────────────────────────────────── */
 
 .search {
   position: relative;
 }
 
 .search__row {
+  position: relative;
   display: flex;
-  gap: 0.6rem;
+  gap: 0.5rem;
   align-items: stretch;
+}
+
+.search__icon {
+  position: absolute;
+  left: 1rem;
+  top: 50%;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  color: var(--muted-2);
+  pointer-events: none;
+  transition: color var(--ease);
 }
 
 .search__input {
   flex: 1;
   width: 100%;
-  font-size: 1.08rem;
-  padding: 0.95rem 1.05rem;
+  font-size: 1.1rem;
+  padding: 1rem 1.05rem 1rem 2.85rem; /* left pad clears the icon */
   border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--panel-2);
-  color: var(--text);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--ink);
   outline: none;
-  transition: border-color var(--ease), box-shadow var(--ease), background var(--ease);
+  box-shadow: var(--shadow-sm);
+  transition: border-color var(--ease), box-shadow var(--ease);
 }
 
 .search__input::placeholder {
@@ -175,29 +158,35 @@ body {
 }
 
 .search__input:hover {
-  border-color: #34507a;
+  border-color: #c2ccdb;
 }
 
 .search__input:focus {
   border-color: var(--accent);
-  background: #1d2c47;
   box-shadow: var(--ring);
 }
 
+/* Tint the icon when the field is focused (sibling selector via :focus-within on the row). */
+.search__row:focus-within .search__icon {
+  color: var(--accent);
+}
+
 .search__button {
-  padding: 0 1.35rem;
+  flex: none;
+  padding: 0 1.5rem;
   font-size: 0.95rem;
   font-weight: 700;
   border: none;
   border-radius: var(--radius-sm);
-  background: linear-gradient(180deg, var(--accent) 0%, var(--accent-strong) 100%);
+  background: var(--accent);
   color: var(--accent-ink);
   cursor: pointer;
-  transition: filter var(--ease), transform var(--ease), opacity var(--ease);
+  box-shadow: var(--shadow-sm);
+  transition: background var(--ease), transform var(--ease), opacity var(--ease);
 }
 
 .search__button:hover {
-  filter: brightness(1.08);
+  background: var(--accent-strong);
 }
 
 .search__button:active {
@@ -207,7 +196,13 @@ body {
 .search__button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
-  filter: none;
+  background: var(--accent);
+}
+
+.hero__controls {
+  display: flex;
+  justify-content: center;
+  margin-top: 1.1rem;
 }
 
 /* ── Suggestion dropdown ────────────────────────────────────────────────────────── */
@@ -217,11 +212,11 @@ body {
   z-index: 20;
   left: 0;
   right: 0;
-  margin-top: 0.5rem;
-  background: var(--panel-2);
+  top: calc(100% + 0.55rem);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow-lg);
   overflow: hidden;
   animation: dropdown-in 130ms ease-out;
 }
@@ -229,7 +224,7 @@ body {
 @keyframes dropdown-in {
   from {
     opacity: 0;
-    transform: translateY(-4px);
+    transform: translateY(-5px);
   }
   to {
     opacity: 1;
@@ -240,75 +235,67 @@ body {
 .dropdown__list {
   list-style: none;
   margin: 0;
-  padding: 0.35rem;
-  max-height: 380px;
+  padding: 0.4rem;
+  max-height: 392px;
   overflow-y: auto;
 }
 
 .dropdown__item {
-  position: relative;
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 0.75rem;
-  padding: 0.6rem 0.75rem;
-  border-radius: 8px;
+  padding: 0.62rem 0.75rem;
+  border-radius: 9px;
   cursor: pointer;
+  color: var(--ink-2);
   transition: background var(--ease), color var(--ease);
-}
-
-.dropdown__item + .dropdown__item {
-  /* Hairline divider between rows for scannability (drawn as a top border via ::before
-     so it doesn't shift layout and disappears under the active highlight). */
-  margin-top: 1px;
 }
 
 /* Active (keyboard-highlighted OR hovered) row — one shared visual model for mouse + keys. */
 .dropdown__item--active,
 .dropdown__item:hover {
-  background: linear-gradient(90deg, var(--highlight) 0%, #2747a8 100%);
-  color: #fff;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
 }
 
 .dropdown__query {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.96rem;
+  font-size: 0.97rem;
 }
 
-/* A faint inline bar behind the score gives each suggestion visual weight by popularity.
-   Width is set inline (style) from the score's share of the top result. */
 .dropdown__score {
   flex: none;
-  position: relative;
   font-variant-numeric: tabular-nums;
   font-size: 0.76rem;
+  font-weight: 600;
   color: var(--muted);
-  padding: 0.1rem 0.5rem;
+  padding: 0.12rem 0.55rem;
   border-radius: 999px;
-  background: rgba(148, 163, 184, 0.12);
+  background: var(--bg-2);
 }
 
 .dropdown__item--active .dropdown__score {
-  color: #e6f2ff;
-  background: rgba(255, 255, 255, 0.16);
+  background: #dbe6ff;
+  color: var(--accent-strong);
 }
 
 .dropdown__meta {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0.5rem 0.8rem;
+  padding: 0.55rem 0.85rem;
   font-size: 0.72rem;
   color: var(--muted);
   border-top: 1px solid var(--border);
-  background: rgba(0, 0, 0, 0.15);
+  background: var(--surface-2);
 }
 
 .badge {
   display: inline-block;
-  padding: 0.1rem 0.5rem;
+  padding: 0.12rem 0.55rem;
   border-radius: 999px;
   font-size: 0.68rem;
   font-weight: 700;
@@ -316,12 +303,12 @@ body {
 }
 
 .badge--cache {
-  background: rgba(74, 222, 128, 0.16);
+  background: var(--ok-soft);
   color: var(--ok);
 }
 
 .badge--trie {
-  background: rgba(56, 189, 248, 0.16);
+  background: var(--accent-soft);
   color: var(--accent);
 }
 
@@ -333,8 +320,9 @@ body {
 /* ── Status (loading / error / empty) ───────────────────────────────────────────── */
 
 .status {
-  padding: 0.85rem 0.85rem;
+  padding: 0.9rem 0.85rem;
   font-size: 0.9rem;
+  color: var(--muted);
 }
 
 .status--error {
@@ -350,8 +338,8 @@ body {
   display: inline-block;
   width: 14px;
   height: 14px;
-  margin-right: 0.5rem;
-  border: 2px solid var(--border);
+  margin-right: 0.55rem;
+  border: 2px solid var(--border-strong);
   border-top-color: var(--accent);
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
@@ -368,11 +356,11 @@ body {
 
 .toggle {
   display: inline-flex;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   border-radius: 999px;
   padding: 4px;
-  background: var(--panel-2);
-  margin-top: 1rem;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
 }
 
 .toggle__btn {
@@ -381,66 +369,109 @@ body {
   color: var(--muted);
   font-size: 0.82rem;
   font-weight: 600;
-  padding: 0.4rem 0.95rem;
+  padding: 0.42rem 1rem;
   border-radius: 999px;
   cursor: pointer;
   transition: background var(--ease), color var(--ease);
 }
 
 .toggle__btn:hover:not(.toggle__btn--active) {
-  color: var(--text);
+  color: var(--ink-2);
 }
 
 .toggle__btn--active {
-  background: linear-gradient(180deg, var(--accent) 0%, var(--accent-strong) 100%);
+  background: var(--accent);
   color: var(--accent-ink);
-  box-shadow: var(--shadow-soft);
 }
 
 .toggle__hint {
   display: block;
-  margin-top: 0.55rem;
-  font-size: 0.76rem;
+  text-align: center;
+  margin-top: 0.6rem;
+  font-size: 0.78rem;
   color: var(--muted);
-  line-height: 1.4;
+  line-height: 1.45;
 }
 
 /* ── Search result banner (dummy "Searched" response) ───────────────────────────── */
 
 .result-banner {
   margin-top: 1.1rem;
-  padding: 0.75rem 0.95rem;
+  padding: 0.8rem 0.95rem;
   border-radius: var(--radius-sm);
-  background: rgba(74, 222, 128, 0.1);
-  border: 1px solid rgba(74, 222, 128, 0.3);
+  background: var(--ok-soft);
+  border: 1px solid #bbf7d0;
   color: var(--ok);
   font-size: 0.9rem;
+  font-weight: 500;
+  text-align: center;
   animation: dropdown-in 150ms ease-out;
 }
 
-/* ── Trending list ──────────────────────────────────────────────────────────────── */
+/* ── Trending section ───────────────────────────────────────────────────────────── */
 
+.trending-section {
+  margin-top: 0.5rem;
+}
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem 1.35rem 1.4rem;
+  box-shadow: var(--shadow-md);
+}
+
+.panel__title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 1rem;
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+}
+
+/* Transient "updating…" hint next to the Trending title while we wait out the batch flush. */
+.panel__hint {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+  font-style: italic;
+  color: var(--accent);
+}
+
+/* Trending rows in a responsive two-up grid on wider screens, one column on mobile. */
 .trending__list {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 4px;
+}
+
+@media (min-width: 560px) {
+  .trending__list {
+    grid-template-columns: 1fr 1fr;
+    gap: 4px 1.5rem;
+  }
 }
 
 .trending__item {
   display: flex;
   align-items: center;
   gap: 0.7rem;
-  padding: 0.55rem 0.55rem;
+  padding: 0.55rem 0.5rem;
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background var(--ease);
 }
 
 .trending__item:hover {
-  background: var(--panel-3);
+  background: var(--surface-2);
 }
 
 .trending__item:focus-visible {
@@ -452,25 +483,22 @@ body {
   flex: none;
   display: grid;
   place-items: center;
-  width: 1.55rem;
-  height: 1.55rem;
+  width: 1.6rem;
+  height: 1.6rem;
   border-radius: 8px;
-  background: var(--panel-3);
+  background: var(--bg-2);
   color: var(--muted);
   font-variant-numeric: tabular-nums;
   font-size: 0.78rem;
   font-weight: 700;
 }
 
-/* Top three get a warmer rank chip so "hottest" reads at a glance. */
-.trending__item:nth-child(1) .trending__rank {
-  background: rgba(56, 189, 248, 0.2);
-  color: var(--accent);
-}
+/* Top three get the accent chip so "hottest" reads at a glance. */
+.trending__item:nth-child(1) .trending__rank,
 .trending__item:nth-child(2) .trending__rank,
 .trending__item:nth-child(3) .trending__rank {
-  background: rgba(56, 189, 248, 0.12);
-  color: #7dd3fc;
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .trending__query {
@@ -478,7 +506,8 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.92rem;
+  font-size: 0.93rem;
+  color: var(--ink-2);
 }
 
 .trending__counts {
@@ -486,7 +515,7 @@ body {
   font-size: 0.72rem;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
-  padding: 0.1rem 0.45rem;
+  padding: 0.12rem 0.5rem;
   border-radius: 999px;
-  background: rgba(148, 163, 184, 0.1);
+  background: var(--bg-2);
 }

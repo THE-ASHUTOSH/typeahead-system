@@ -20,9 +20,8 @@ import {
   score,
   type RecencyCandidate,
 } from "../src/ranking/recency.js";
-import { rankByCount } from "../src/ranking/basic.js";
+import { rankByCount, type CountedQuery } from "../src/ranking/basic.js";
 import { config } from "../src/config.js";
-import type { Suggestion } from "../src/trie/Trie.js";
 
 /**
  * Map a recency candidate to the basic ranker's input shape: the basic ranking
@@ -30,7 +29,7 @@ import type { Suggestion } from "../src/trie/Trie.js";
  * exactly how the read path feeds the two rankers from the same candidates, so
  * comparing their outputs is a faithful basic-vs-enhanced comparison.
  */
-function asBasicSuggestion(c: RecencyCandidate): Suggestion {
+function asBasicSuggestion(c: RecencyCandidate): CountedQuery {
   return { query: c.query, count: c.allTimeCount };
 }
 

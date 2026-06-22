@@ -256,85 +256,91 @@ export default function App() {
   return (
     <div className="app">
       <header className="app__header">
-        <h1 className="app__title">Search Typeahead</h1>
+        <span className="app__badge">Typeahead</span>
+        <h1 className="app__title">Search anything, instantly</h1>
         <p className="app__subtitle">
-          Type to see live suggestions · Enter or Search to submit · toggle ranking to compare
+          Live suggestions as you type · Enter or Search to submit · toggle ranking to compare
         </p>
       </header>
 
-      <div className="layout">
-        {/* ── Left: search + suggestions + result + (optional) cache debug ── */}
-        <div>
-          <section className="panel">
-            <h2 className="panel__title">Search</h2>
+      {/* ── Centered search hero: the input, its dropdown, mode toggle, and result ── */}
+      <section className="hero">
+        <div className="search">
+          <div className="search__row">
+            <span className="search__icon" aria-hidden="true">
+              {/* Inline magnifier glyph (SVG) so there's no icon-font dependency. */}
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="11" cy="11" r="7" />
+                <path d="m21 21-4.3-4.3" />
+              </svg>
+            </span>
+            <input
+              ref={inputRef}
+              className="search__input"
+              type="text"
+              // ARIA combobox pattern: this input controls the listbox popup below.
+              role="combobox"
+              aria-expanded={open && suggestions.length > 0}
+              aria-controls={LISTBOX_ID}
+              aria-autocomplete="list"
+              aria-activedescendant={activeDescendant}
+              placeholder="Search for anything…"
+              value={input}
+              autoFocus
+              onChange={(e) => {
+                justSubmittedRef.current = false; // a real keystroke → let the dropdown open again
+                setInput(e.target.value);
+                setSearchResult(null); // clear the old "Searched" banner once typing resumes
+                setOpen(true);
+              }}
+              onFocus={() => {
+                if (suggestions.length > 0) setOpen(true);
+              }}
+              // Delay close so a suggestion mousedown registers before blur hides the list.
+              onBlur={() => window.setTimeout(() => setOpen(false), 120)}
+              onKeyDown={onInputKeyDown}
+            />
+            <button
+              className="search__button"
+              type="button"
+              disabled={input.trim().length === 0}
+              onClick={() => submitSearch(input)}
+            >
+              Search
+            </button>
 
-            <div className="search">
-              <div className="search__row">
-                <input
-                  ref={inputRef}
-                  className="search__input"
-                  type="text"
-                  // ARIA combobox pattern: this input controls the listbox popup below.
-                  role="combobox"
-                  aria-expanded={open && suggestions.length > 0}
-                  aria-controls={LISTBOX_ID}
-                  aria-autocomplete="list"
-                  aria-activedescendant={activeDescendant}
-                  placeholder="Search for anything…"
-                  value={input}
-                  autoFocus
-                  onChange={(e) => {
-                    justSubmittedRef.current = false; // a real keystroke → let the dropdown open again
-                    setInput(e.target.value);
-                    setSearchResult(null); // clear the old "Searched" banner once typing resumes
-                    setOpen(true);
-                  }}
-                  onFocus={() => {
-                    if (suggestions.length > 0) setOpen(true);
-                  }}
-                  // Delay close so a suggestion mousedown registers before blur hides the list.
-                  onBlur={() => window.setTimeout(() => setOpen(false), 120)}
-                  onKeyDown={onInputKeyDown}
-                />
-                <button
-                  className="search__button"
-                  type="button"
-                  disabled={input.trim().length === 0}
-                  onClick={() => submitSearch(input)}
-                >
-                  Search
-                </button>
-              </div>
-
-              {/* The dropdown only renders while open and there's a prefix being worked on. */}
-              {open && debouncedInput.trim().length > 0 && (
-                <SuggestionDropdown
-                  suggestions={suggestions}
-                  activeIndex={activeIndex}
-                  loading={suggestLoading}
-                  error={suggestError}
-                  source={suggestSource}
-                  node={suggestNode}
-                  listboxId={LISTBOX_ID}
-                  optionId={optionId}
-                  onHover={setActiveIndex}
-                  onPick={pickQuery}
-                />
-              )}
-            </div>
-
-            <ModeToggle mode={mode} onChange={setMode} />
-
-            {/* Dummy search response display (spec §9). */}
-            {searchResult && (
-              <div className="result-banner" role="status">
-                {searchResult}
-              </div>
+            {/* The dropdown only renders while open and there's a prefix being worked on. */}
+            {open && debouncedInput.trim().length > 0 && (
+              <SuggestionDropdown
+                suggestions={suggestions}
+                activeIndex={activeIndex}
+                loading={suggestLoading}
+                error={suggestError}
+                source={suggestSource}
+                node={suggestNode}
+                listboxId={LISTBOX_ID}
+                optionId={optionId}
+                onHover={setActiveIndex}
+                onPick={pickQuery}
+              />
             )}
-          </section>
-        </div>
+          </div>
 
-        {/* ── Right: trending sidebar (always visible) ── */}
+          <div className="hero__controls">
+            <ModeToggle mode={mode} onChange={setMode} />
+          </div>
+
+          {/* Dummy search response display (spec §9). */}
+          {searchResult && (
+            <div className="result-banner" role="status">
+              {searchResult}
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* ── Trending section below the hero (full width) ── */}
+      <section className="trending-section">
         <TrendingPanel
           rows={trending}
           loading={trendingLoading}
@@ -342,7 +348,7 @@ export default function App() {
           updating={trendingUpdating}
           onPick={pickQuery}
         />
-      </div>
+      </section>
     </div>
   );
 }

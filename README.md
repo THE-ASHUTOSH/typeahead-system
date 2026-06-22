@@ -13,7 +13,7 @@ pressure is reduced.
 
 | Component | Marks | Where |
 |---|---|---|
-| **Basic implementation** — dataset ingestion, search UI, `GET /suggest`, `POST /search`, query-count updates, distributed cache with consistent hashing | 60 | `trie/`, `cache/`, `store/`, `app.ts`, `frontend/` |
+| **Basic implementation** — dataset ingestion, search UI, `GET /suggest`, `POST /search`, query-count updates, distributed cache with consistent hashing | 60 | `cache/`, `store/`, `app.ts`, `frontend/` |
 | **Trending searches** — recency-aware ranking + explanation | 20 | `ranking/recency.ts`, `store/QueryStore.ts` (windows), `/trending` |
 | **Batch writes** — buffering, aggregation, flush, write-reduction evidence, failure trade-offs | 20 | `batch/BatchWriter.ts` |
 
@@ -25,7 +25,7 @@ pressure is reduced.
           │  POST /search (Enter)
           ▼
    Express + TypeScript API (:8080)
-   ├─ /suggest → consistent-hash ring → Redis node → HIT? return : MISS → Trie → cache w/ TTL
+   ├─ /suggest → consistent-hash ring → Redis node → HIT? return : MISS → SQL prefix query → cache w/ TTL
    ├─ /search  → {message:"Searched"} → BatchWriter buffer → flush → Postgres + invalidate
    ├─ /trending, /cache/debug, /cache/nodes, /metrics
    ▼
@@ -108,12 +108,12 @@ re-runs produce the identical file. `scripts/ingest.ts` bulk-loads the CSV into 
 ## Tests
 
 ```bash
-cd backend && npm test     # 50 unit tests (Trie, consistent-hash ring, batch writer, recency ranking)
+cd backend && npm test     # 30 unit tests (consistent-hash ring, batch writer, recency ranking)
 ```
 
-These are **pure-logic** tests — no Docker/DB/Redis needed — including the load-bearing ones:
-the ring's key-movement property (only ~1/N keys move when a node is added) and the trie's
-top-K cache matching a brute-force oracle.
+These are **pure-logic** tests — no Docker/DB/Redis needed — including the load-bearing one:
+the ring's key-movement property (only ~1/N keys move when a node is added). The SQL prefix search
+is verified end-to-end against a real Postgres (and via `EXPLAIN`, that it uses the prefix index).
 
 ## Performance (measured)
 
@@ -178,8 +178,8 @@ curl "http://localhost:8080/metrics"   # batch.writesSaved, db.dbWrites, cache h
 Summarized in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**. Headlines:
 
 - **Consistent hashing over `hash % N`** so adding/removing a cache node moves only ~1/N of keys instead of nearly all of them (which would wipe the cache).
-- **Cache-aside (lazy) over write-through** — the trie/Postgres is the source of truth; the cache only memoizes derived top-K, so a miss is always recoverable and the cache layer stays ranking-agnostic.
-- **Build-once trie + rebuild-on-flush** instead of in-place count updates — keeps the per-node top-K cache simple and correct (no eviction-corruption), at the cost of a periodic O(dataset) rebuild.
+- **SQL prefix search over an in-memory trie** — suggestions on a miss come from `WHERE query LIKE 'p%'` backed by a `text_pattern_ops` index (a bounded range scan), keeping Postgres the single source of truth with no second index to keep in sync. The cache hides the miss cost (~99% hit rate).
+- **Cache-aside (lazy) over write-through** — Postgres is the source of truth; the cache only memoizes derived top-K, so a miss is always recoverable and the cache layer stays ranking-agnostic.
 - **Batching trades durability for throughput** — buffered counts are lost if the process hard-crashes before a flush (bounded to ~2s of data); graceful shutdown flushes the tail.
 - **Sliding windows for recency** — a spike ages out of the 1h then 24h window automatically, so nothing is permanently over-ranked.
 
@@ -188,15 +188,14 @@ Summarized in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**. Headlines:
 ```
 backend/src/
   config.ts            env-driven knobs (ports, TTL, weights, batch size, vnodes)
-  index.ts             bootstrap: store + trie + cache + batch writer + server lifecycle
+  index.ts             bootstrap: store + cache + batch writer + server lifecycle
   app.ts               Express routes (the HTTP layer only)
-  trie/Trie.ts         prefix tree with per-node top-K cache
   cache/
     ConsistentHashRing.ts   our hash ring with virtual nodes
     RedisCacheNode.ts       one resilient ioredis client per node
     CacheService.ts         cache-aside facade routed by the ring
   store/
-    QueryStore.ts      the only Postgres access; single multi-row upsert; window queries
+    QueryStore.ts      the only Postgres access; SQL prefix search; single multi-row upsert; window queries
     schema.sql         the one canonical schema (queries + search_events)
   ranking/
     basic.ts           sort by all-time count (60% path)

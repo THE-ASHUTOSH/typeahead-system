@@ -8,7 +8,7 @@
 --
 -- TWO TABLES, TWO JOBS:
 --   queries        — the durable, authoritative all-time count per query. This is
---                    the source of truth the in-memory trie is rebuilt from.
+--                    the source of truth the prefix search (GET /suggest) reads from.
 --   search_events  — an append-mostly activity log used ONLY to compute the
 --                    recency windows (1h / 24h) for the trending ranking.
 -- Splitting them keeps each concern simple: `queries` answers "how popular ever?",
@@ -36,15 +36,17 @@ CREATE TABLE IF NOT EXISTS queries (
   last_searched TIMESTAMPTZ
 );
 
--- NOTE on prefix search: we deliberately do NOT add a btree index on
--- queries(query text_pattern_ops) to support `LIKE 'pre%'` lookups. Prefix
--- autocomplete is served entirely by the IN-MEMORY TRIE (built once from this
--- table at boot), NOT by SQL. WHY: a SQL LIKE range scan would hit the database
--- (and its disk / network) on EVERY keystroke, which is exactly the per-keystroke
--- latency we are trying to avoid. The trie answers a prefix in O(prefix length)
--- from RAM with a pre-sorted top-K per node. So `queries` only needs its PRIMARY
--- KEY index (used by the upsert's ON CONFLICT and by point lookups); no extra
--- prefix index is justified.
+-- PREFIX-SEARCH INDEX (the one that makes GET /suggest fast on a cache miss).
+-- Suggestions are served by a SQL prefix query: `WHERE query LIKE 'pre%'`. A plain
+-- PRIMARY KEY btree CANNOT serve `LIKE 'pre%'` as a range scan, because the default
+-- index sorts by the database's collation rather than raw byte order, and `LIKE`
+-- anchored matching needs byte-order. The `text_pattern_ops` operator class builds
+-- the btree in the order `LIKE 'x%'` can range-scan, so the query becomes a bounded
+-- scan of just the matching prefix range instead of a full-table scan. The cache
+-- (Redis) absorbs ~99% of suggestion reads, so this index only does work on a miss,
+-- but when it does, it keeps that miss fast even on ~162k rows.
+CREATE INDEX IF NOT EXISTS idx_queries_prefix
+  ON queries (query text_pattern_ops);
 
 -- ----------------------------------------------------------------------------
 -- search_events: the recency activity log feeding the 1h / 24h trending windows.

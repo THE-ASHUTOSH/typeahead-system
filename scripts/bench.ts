@@ -267,7 +267,7 @@ ${Object.entries(result.ringStats).map(([n, c]) => `| ${n} | ${c} |`).join("\n")
 
 ## Interpretation
 
-- **Low latency:** the suggestions p95 of **${L.p95} ms** comes from serving most reads out of the distributed Redis cache (hit rate **${(result.cacheMeasuredPhase.hitRate * 100).toFixed(1)}%**); a miss falls back to the in-memory trie (O(prefix length)), never a SQL \`LIKE\` scan.
+- **Low latency:** the suggestions p95 of **${L.p95} ms** comes from serving most reads out of the distributed Redis cache (hit rate **${(result.cacheMeasuredPhase.hitRate * 100).toFixed(1)}%**); a miss falls back to a single indexed SQL prefix scan (LIKE 'p%' on the text_pattern_ops index), not a full-table scan.
 - **Write reduction:** ${result.batch.totalSubmissions} search submissions collapsed into just ${result.batch.totalDbWrites} aggregated DB writes (**${result.batch.writesSaved} writes saved**) — the batch writer aggregates repeats per flush, so the primary store is never written synchronously per request.
 - **Even cache distribution:** the consistent-hash ring with virtual nodes spreads keys roughly evenly across the three Redis nodes (see table), and adding/removing a node only re-homes a small fraction of keys.
 `;

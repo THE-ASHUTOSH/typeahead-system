@@ -1,28 +1,26 @@
 /**
  * app.ts — builds and returns the Express application, given its dependencies INJECTED.
  *
- * WHY dependency injection (trie, cache, batchWriter, store passed in, not imported):
+ * WHY dependency injection (cache, batchWriter, store passed in, not imported):
  * the bootstrap (index.ts) owns the lifecycle (init/connect/shutdown) of the real
  * Postgres/Redis-backed instances; this module only owns ROUTING. Passing the
- * collaborators in means the app can be constructed in a test with fakes (an
- * in-memory trie, a stub cache) and exercised with supertest — no Docker required.
+ * collaborators in means the app can be constructed in a test with fakes (a stub
+ * store, a stub cache) and exercised with supertest — no Docker required.
  * It also keeps each concern in one place: SQL lives in QueryStore, ranking in
  * ranking/, caching in CacheService, and HTTP wiring lives here.
  *
- * The trie is passed via a GETTER (`getTrie`), not the trie object directly, because
- * the trie is REBUILT (a brand-new instance) after count-changing flushes — see the
- * build-once contract in Trie.ts. Holding a getter means the routes always read the
- * current trie instance instead of a stale closed-over reference.
+ * Suggestions on a cache MISS come straight from the store's SQL prefix search
+ * (`store.searchPrefix`), so this module never holds an in-memory index of its own —
+ * the cache absorbs the hot reads and Postgres is the source of truth behind it.
  */
 
 import express, { type Express, type Request, type Response, type NextFunction } from "express";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { config } from "./config.js";
-import type { Trie, Suggestion as TrieSuggestion } from "./trie/Trie.js";
 import type { CacheService } from "./cache/CacheService.js";
 import type { BatchWriter } from "./batch/BatchWriter.js";
-import type { QueryStore } from "./store/QueryStore.js";
+import type { QueryStore, QueryRow } from "./store/QueryStore.js";
 import type { Suggestion as CacheSuggestion } from "./cache/types.js";
 import { rankByCount } from "./ranking/basic.js";
 import { rankRecencyAware, type RecencyCandidate } from "./ranking/recency.js";
@@ -37,9 +35,6 @@ export type SuggestMode = "basic" | "recency";
  * never constructs (or closes) a Postgres pool or a Redis socket itself.
  */
 export interface AppDeps {
-  /** Returns the CURRENT trie. A getter (not the trie itself) so a post-flush rebuild
-   *  swaps in a new instance transparently — routes always see fresh counts. */
-  getTrie: () => Trie;
   cache: CacheService;
   batchWriter: BatchWriter;
   store: QueryStore;
@@ -47,8 +42,8 @@ export interface AppDeps {
   defaultMode?: SuggestMode;
 }
 
-/** Normalise a raw query/prefix the SAME way the trie and cache do (trim + lowercase),
- *  so a request, its cache key, and its trie lookup all agree on the key. */
+/** Normalise a raw query/prefix the SAME way the store and cache do (trim + lowercase),
+ *  so a request, its cache key, and its SQL prefix lookup all agree on the key. */
 function normalize(input: unknown): string {
   return typeof input === "string" ? input.trim().toLowerCase() : "";
 }
@@ -70,7 +65,7 @@ export function makeModeKey(mode: SuggestMode, q: string): string {
 }
 
 export function buildApp(deps: AppDeps): Express {
-  const { getTrie, cache, batchWriter, store } = deps;
+  const { cache, batchWriter, store } = deps;
   const defaultMode: SuggestMode = deps.defaultMode ?? "basic";
   const app = express();
 
@@ -108,7 +103,7 @@ export function buildApp(deps: AppDeps): Express {
 
       // Empty/missing prefix → return [] gracefully (spec §4.1). A typeahead box with
       // nothing typed should show no dropdown; trending is its own endpoint. source:"empty"
-      // (not "trie") honestly reports that NO lookup happened — neither cache nor trie was hit.
+      // (not "db") honestly reports that NO lookup happened — neither cache nor DB was hit.
       if (q.length === 0) {
         res.json({ suggestions: [], source: "empty", node: null, mode });
         return;
@@ -125,21 +120,21 @@ export function buildApp(deps: AppDeps): Express {
 
       // --- CACHE-ASIDE READ STEP --------------------------------------------------
       // Try the cache FIRST. On a hit we return the cached {query,score}[] verbatim — no
-      // trie walk, no ranking, no DB. This is the low-latency path the rubric grades.
+      // SQL prefix scan, no ranking, no DB. This is the low-latency path the rubric grades.
       const cached = await cache.getSuggestions(cacheKeyPrefix);
       if (cached.hit && cached.value !== null) {
         res.json({ suggestions: cached.value, source: "cache", node: cached.node, mode });
         return;
       }
 
-      // --- MISS: rebuild from the source of truth (trie), then populate the cache ---
-      // Walk the trie for prefix matches. searchPrefix returns {query,count}[] already
-      // sorted by count; we cap at config.suggestLimit (== the trie's per-node top-K
-      // capacity, so the result is exact, never truncated).
-      const matches: TrieSuggestion[] = getTrie().searchPrefix(q, config.suggestLimit);
+      // --- MISS: read from the source of truth (Postgres prefix search), then cache it ---
+      // store.searchPrefix runs `... WHERE query LIKE 'q%' ORDER BY count DESC LIMIT N`,
+      // a bounded range scan backed by the text_pattern_ops index (see schema.sql). It
+      // returns {query,count}[] already sorted by all-time count.
+      const matches: QueryRow[] = await store.searchPrefix(q, config.suggestLimit);
 
       // Map to the CACHE's Suggestion shape {query, score}. The two shapes differ on
-      // purpose (trie={query,count}, cache={query,score}); we translate here so the cache
+      // purpose (store={query,count}, cache={query,score}); we translate here so the cache
       // stays ranking-agnostic and just memoises whatever score the active mode produced.
       let suggestions: CacheSuggestion[];
 
@@ -153,8 +148,8 @@ export function buildApp(deps: AppDeps): Express {
         // with no recent events simply isn't in the map → treated as count1h=count24h=0.
         const windowByQuery = new Map(windows.map((w) => [w.query, w]));
 
-        // 2) Build RecencyCandidate[]: allTimeCount comes from the trie's count (the
-        //    authoritative lifetime total), the window counts from search_events.
+        // 2) Build RecencyCandidate[]: allTimeCount comes from the prefix search's count
+        //    (the authoritative lifetime total), the window counts from search_events.
         const candidates: RecencyCandidate[] = matches.map((m) => {
           const w = windowByQuery.get(m.query);
           return {
@@ -170,8 +165,9 @@ export function buildApp(deps: AppDeps): Express {
         // The cached score IS the recency score, so a future cache hit returns the same order.
         suggestions = ranked.map((c) => ({ query: c.query, score: c.score }));
       } else {
-        // BASIC (the 60% path): sort purely by all-time count. The score we cache is the
-        // count itself, so the dropdown can show/sort by it and a cache hit reproduces the order.
+        // BASIC (the 60% path): the prefix search already sorted by all-time count, but we
+        // run rankByCount to enforce the cap + a stable order. The cached score is the count
+        // itself, so the dropdown can show/sort by it and a cache hit reproduces the order.
         const ranked = rankByCount(matches, config.suggestLimit);
         suggestions = ranked.map((s) => ({ query: s.query, score: s.count }));
       }
@@ -182,7 +178,7 @@ export function buildApp(deps: AppDeps): Express {
       // prefix with no matches is a legitimate, repeatable answer worth memoising.
       await cache.setSuggestions(cacheKeyPrefix, suggestions);
 
-      res.json({ suggestions, source: "trie", node: cached.node, mode });
+      res.json({ suggestions, source: "db", node: cached.node, mode });
     } catch (err) {
       next(err); // hand to the JSON error middleware below
     } finally {
